@@ -7,7 +7,7 @@ An alternate open source CI/CD tool to Jenkins with modern architecture and bett
 - **Better UI/UX**: Modern web interface built with SvelteKit
 - **GitOps Native**: Jobs defined as YAML files, version-controlled
 - **Self-Hosted**: Control plane runs anywhere, connects to any SCM (GitHub, GitLab, etc.)
-- **HTTP-First**: Simple REST API for easy integration and extensibility
+- **HTTP-First**: Pure HTTP/JSON API for all communication - no gRPC complexity
 - **High Performance**: Built with Zig and Zap HTTP server for blazing speed
 
 ## Architecture
@@ -15,27 +15,28 @@ An alternate open source CI/CD tool to Jenkins with modern architecture and bett
 ### Control Plane and Data Plane Separation
 
 **Control Plane** (HTTP Server):
-- Zap-based HTTP server written in Zig
-- PostgreSQL for metadata storage
+- Zap-based HTTP server written in Zig for blazing performance
+- PostgreSQL for metadata storage with connection pooling
 - Redis for caching and real-time updates
 - S3-compatible storage for artifacts
-- SvelteKit web interface for modern UI
+- SvelteKit web interface with Server-Sent Events (SSE)
 
 **Data Plane** (Agents):
 - Docker containers with HTTP endpoints
 - Ephemeral agents (one job at a time)
-- Self-registering via `/register` endpoint
-- Health monitoring via `/health` endpoint
+- Self-registering via `POST /api/v1/agents/register`
+- Health monitoring via `POST /api/v1/agents/{id}/heartbeat`
+- Job polling via `GET /api/v1/agents/{id}/jobs`
 - Build caching through shared volumes
 
 ### Communication Flow
 
 ```
-┌─────────────────┐    HTTP/JSON    ┌─────────────────┐
+┌─────────────────┐   HTTP/JSON     ┌─────────────────┐
 │   Control       │ ────────────────▶│     Agent       │
-│   Plane         │                 │   (Docker)      │
+│   Plane         │   Job Polling   │   (Docker)      │
 │   (Zap Server)  │◀──────────────── │                 │
-└─────────────────┘    Status       └─────────────────┘
+└─────────────────┘   Status/Logs   └─────────────────┘
         │               Updates              │
         │                                   │
         ▼                                   ▼
@@ -46,58 +47,67 @@ An alternate open source CI/CD tool to Jenkins with modern architecture and bett
 └─────────────────┘                └─────────────────┘
 ```
 
-### API Endpoints
+### HTTP API Endpoints
 
 **Control Plane**:
-- `POST /register` - Agent registration
-- `GET /agents` - List active agents
-- `POST /jobs` - Create new job
-- `GET /jobs/{id}` - Job status and logs
-- `POST /jobs/{id}/status` - Status updates from agents
+- `POST /api/v1/agents/register` - Agent registration
+- `GET /api/v1/agents` - List active agents
+- `GET /api/v1/agents/{id}/jobs` - Get job assignments for agent
+- `POST /api/v1/jobs` - Create new job
+- `GET /api/v1/jobs/{id}` - Job status and logs
+- `GET /api/v1/jobs/{id}/logs/stream` - Stream job logs (SSE)
+- `PUT /api/v1/jobs/{id}/status` - Status updates from agents
+- `POST /api/v1/agents/{id}/heartbeat` - Agent heartbeat
 
-**Agent**:
-- `GET /health` - Health check endpoint
-- `POST /jobs` - Receive job assignment
-- `GET /jobs/{id}` - Job status query
-- `DELETE /jobs/{id}` - Cancel running job
+**Agent Client Actions**:
+- Poll for jobs via `GET /api/v1/agents/{id}/jobs`
+- Send status updates via `PUT /api/v1/jobs/{id}/status`
+- Send heartbeat via `POST /api/v1/agents/{id}/heartbeat`
+- Stream logs via `POST /api/v1/jobs/{id}/logs`
 
 ## Technology Stack
 
-- **Backend**: Zig with Zap HTTP server
-- **Database**: PostgreSQL + Redis
+- **Backend**: Zig with Zap HTTP server (microsecond response times)
+- **Database**: PostgreSQL + Redis (async connections)
 - **Storage**: MinIO/S3 compatible
-- **Frontend**: SvelteKit + TailwindCSS
-- **Agents**: Docker containers with HTTP servers
-- **Serialization**: JSON for HTTP API
+- **Frontend**: SvelteKit + TailwindCSS + Server-Sent Events
+- **Agents**: Docker containers with HTTP clients
+- **Communication**: HTTP/JSON only (no gRPC)
+- **Real-time**: Server-Sent Events (SSE) for live updates
+- **Architecture**: Domain-driven design with clear boundaries
 
 ## Development Phases
 
 ### Phase 1: Core HTTP Infrastructure (4-6 weeks)
 - [x] Project setup and architecture planning
-- [ ] Zap HTTP server with basic endpoints
-- [ ] Agent registration and health monitoring
-- [ ] PostgreSQL integration
-- [ ] Basic job API
+- [x] Architecture documentation updated for Zig + HTTP-only
+- [ ] Zap HTTP server with domain-driven structure
+- [ ] Agent registration and heartbeat system
+- [ ] PostgreSQL + Redis integration
+- [ ] Basic job API with state machines
 
 ### Phase 2: Job Execution (4-6 weeks)
 - [ ] YAML pipeline parser
 - [ ] Job distribution algorithm
-- [ ] Real-time status updates
-- [ ] Log streaming and collection
-- [ ] SvelteKit web interface with real-time features
+- [ ] Real-time status updates via HTTP
+- [ ] Log streaming via Server-Sent Events
+- [ ] SvelteKit web interface with SSE integration
 
 ### Phase 3: Production Features (6-8 weeks)
-- [ ] GitHub/GitLab integration
+- [ ] GitHub/GitLab webhook integration
 - [ ] Artifact storage system
-- [ ] Authentication and authorization
+- [ ] JWT authentication and authorization
 - [ ] Build caching
 - [ ] Agent auto-scaling
+- [ ] Monitoring and metrics
 
 ## Benefits
 
-- **Simple Integration**: Standard HTTP/JSON API
-- **Language Agnostic**: Agents can be written in any language
-- **Easy Debugging**: Standard HTTP tools work out of the box
-- **High Performance**: Zap provides excellent HTTP performance
+- **Simple Integration**: Standard HTTP/JSON API - no gRPC complexity
+- **Language Agnostic**: Agents can be written in any language with HTTP support
+- **Easy Debugging**: Standard HTTP tools (curl, Postman) work out of the box
+- **High Performance**: Zap provides microsecond HTTP response times
 - **Extensible**: Users can build custom agents and integrations
-    
+- **Domain-Driven**: Clear separation of concerns with domain boundaries
+- **Memory Safety**: Zig's compile-time safety prevents common bugs
+- **Real-time**: Server-Sent Events provide live updates without WebSocket complexity
